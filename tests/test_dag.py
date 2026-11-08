@@ -8,7 +8,7 @@ from airflow.models import DagBag
 class DagTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.bag = DagBag(dag_folder="/opt/airflow/dags", include_examples=False)
+        cls.bag = DagBag(dag_folder="/opt/airflow/dags")
 
     def test_imports_and_dependencies(self):
         self.assertFalse(self.bag.import_errors, self.bag.import_errors)

@@ -113,6 +113,71 @@ docker compose exec -T airflow airflow dags list-import-errors
 
 Правки `src/` и `dags/` доступны через mounts; для изменения зависимостей пересоберите образ. Для обычной остановки используйте `docker compose stop`, для запуска — `docker compose up -d`.
 
+## Результаты выполненной проверки
+
+Проверено 8 ноября 2026 года на macOS arm64, в Linux VM Colima с 2 CPU и 4 ГБ RAM. Все три сервиса стали healthy. Исходные данные и выданные модули модели совпали по SHA256 с исходным набором.
+
+| Проверка | Фактический результат |
+|---|---|
+| Контрактные тесты | 14 тестов прошли в контейнере, включая PostgreSQL и DAG |
+| `example_one_task` | Success |
+| `manual__verification_1` | Все четыре задачи success; MLflow `dfc17aacebc94bc7af66ed67215b0c8a` |
+| `manual__verification_2` | Все четыре задачи success; MLflow `5e2befaeb4d44ac8bbc674d35066f241` |
+| Повторный запуск | Снова 21 663 строки; train 17 928, validation 3 735; хеш снимка не изменился |
+| `manual__verification_bad_data` | validate — failed; prepare/train — upstream_failed с `try_number=0` |
+| `manual__verification_clear` | train: failed на попытке 1 → success на попытке 2; остальные задачи сохранили попытку 1 и прежние start/end timestamps |
+| Restart и force-recreate MLflow | Сохранились параметры, полная история метрик и модель; пять прогнозов совпали точно |
+| Чистый локальный Git-клон и новые volumes | `manual__clean_clone` — success; новый MLflow run `db40e56b17654ed69b208950a6bfd9d8`; метрики и пять прогнозов совпали |
+
+Clear выполнен через официальный REST API Airflow с `task_ids=["train"]` и точным `dag_run_id`; upstream/downstream/past/future были выключены. После восстановления обучения создан MLflow run `5829a2a37c994028b4b74a917adb85aa`. Временные ошибки из кода убраны. Запуск с плохими данными намеренно остаётся failed в истории — это результат проверки, а не неисправность рабочего DAG.
+
+При первом включении Airflow также выполнил один последний завершённый недельный интервал (`scheduled__2026-11-02T03:00:00+00:00`). `catchup=False` не создаёт всю историю пропущенных интервалов, но допускает этот последний плановый запуск.
+
+Итоговые метрики для стандартных параметров:
+
+- `train_loss = 1.1881788531779605`;
+- `validation_pr_auc = 0.04923249868594591`;
+- обе метрики записаны на шагах 1–5; качество алгоритма не оптимизировалось.
+
+SHA256 исходного CSV extract:
+
+```text
+9862328e847fc7bc4eea70d5c13b89a8e43df19fc14eb7e982d74385985314a7
+```
+
+Команда, выполненная до и после пересоздания MLflow:
+
+```bash
+docker compose exec -T airflow python -m check_model --run-id 5e2befaeb4d44ac8bbc674d35066f241
+```
+
+Результат:
+
+```json
+{"run_id":"5e2befaeb4d44ac8bbc674d35066f241","rows":5,"probabilities":[0.7106074094772339,0.5012513399124146,0.2709561884403229,0.1435118466615677,0.22757172584533691]}
+```
+
+Эти ID относятся к окружению автора. После клонирования и своего обучения нужно скопировать новый ID из собственного MLflow.
+
+![Успешный DAG с четырьмя задачами](docs/airflow-success.jpg)
+
+![Параметры, метрики и связь с Airflow в MLflow](docs/mlflow-run.jpg)
+
+## Локальное окружение автора
+
+На компьютере автора установлен Docker CLI с Compose и Buildx, а Linux engine работает через профиль Colima `olist` (2 CPU, 4 ГБ RAM). Основной Compose-проект — `olist-homework`; он оставлен работающим. Отдельный проект проверки чистого клона `olist-clean-check` остановлен. Volumes основного окружения сохранены.
+
+После перезагрузки компьютера при необходимости выполните:
+
+```bash
+colima start --profile olist
+docker context use colima-olist
+# Из каталога проекта:
+docker compose up -d
+```
+
+Для освобождения ресурсов можно остановить сервисы командой `docker compose stop`, затем VM командой `colima stop --profile olist`. На компьютере проверяющего эти команды Colima не нужны, если Docker уже работает другим способом.
+
 ## Сдача и лицензия
 
 Сдаются ссылка на репозиторий и SHA финального коммита (`git rev-parse HEAD`), README и два скриншота: успешный DAG и MLflow run с параметрами и метриками.
